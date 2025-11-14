@@ -1,0 +1,211 @@
+import discord
+from discord.ext import commands
+import json
+import datetime
+import os
+
+# -------------------
+# ⭐ BOT CONFIG
+# -------------------
+TOKEN = "MTQzODc4MzQxODUwMTU2MjQ4MA.GCSdyL.-uYfoIVnpsc0u2_Wf_M7NQLex5hzJ-Y-hHiaRg"
+TRACKER_CHANNEL_ID = 1438782179550171207    # Channel where the tracker message lives
+
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+
+STATS_FILE = "stats.json"
+
+# -------------------
+# ⭐ LOAD & SAVE STATS
+# -------------------
+def load_stats():
+    if not os.path.exists(STATS_FILE):
+        return {
+            "interviews": 0,
+            "trainings": 0,
+            "shift_minutes": 0,
+            "tickets": 0,
+            "reports": 0,
+
+            "goal_interviews": 0,
+            "goal_trainings": 0,
+            "goal_shift_minutes": 0,
+            "goal_tickets": 0,
+            "goal_reports": 0,
+
+            "message_id": None
+        }
+    with open(STATS_FILE, "r") as f:
+        return json.load(f)
+
+def save_stats():
+    with open(STATS_FILE, "w") as f:
+        json.dump(stats, f, indent=4)
+
+stats = load_stats()
+
+
+# -------------------
+# ⭐ WEEK RANGE STRING
+# -------------------
+def current_week_range():
+    today = datetime.date.today()
+    monday = today - datetime.timedelta(days=today.weekday())
+    sunday = monday + datetime.timedelta(days=6)
+
+    return f"{monday.strftime('%b %d')} — {sunday.strftime('%b %d')}"
+
+
+# -------------------
+# ⭐ TRACKER CONTENT
+# -------------------
+def build_tracker_content():
+    week = current_week_range()
+    return (
+        f"🎀 **Mani’s Weekly Tracker** — {week}\n\n"
+
+        f"🗂 **Interviews:** {stats['interviews']} / {stats['goal_interviews']}\n"
+        f"📘 **Trainings:** {stats['trainings']} / {stats['goal_trainings']}\n"
+        f"⏱ **Shifts:** {stats['shift_minutes']} / {stats['goal_shift_minutes']} minutes\n"
+        f"🎫 **Tickets:** {stats['tickets']} / {stats['goal_tickets']}\n"
+        f"📄 **Reports:** {stats['reports']} / {stats['goal_reports']}\n\n"
+
+        f"Last Updated: <t:{int(datetime.datetime.utcnow().timestamp())}:t>"
+    )
+
+
+# -------------------
+# ⭐ UPDATE TRACKER MESSAGE
+# -------------------
+async def update_tracker(channel):
+    content = build_tracker_content()
+
+    # No message exists yet → create one
+    if stats["message_id"] is None:
+        msg = await channel.send(content)
+        stats["message_id"] = msg.id
+        save_stats()
+        return
+
+    # Update existing message
+    try:
+        msg = await channel.fetch_message(stats["message_id"])
+        await msg.edit(content=content)
+    except discord.NotFound:
+        msg = await channel.send(content)
+        stats["message_id"] = msg.id
+
+    save_stats()
+
+
+# -------------------
+# ⭐ DECORATOR: MUST BE IN TRACKER CHANNEL
+# -------------------
+def in_tracker_channel():
+    def predicate(ctx):
+        return ctx.channel.id == TRACKER_CHANNEL_ID
+    return commands.check(predicate)
+
+
+# -------------------
+# ⭐ COMMANDS
+# -------------------
+
+@bot.command(name="resetweek")
+@in_tracker_channel()
+async def cmd_resetweek(ctx):
+    """Reset the week & set new goals interactively."""
+
+    # Reset counters
+    stats["interviews"] = 0
+    stats["trainings"] = 0
+    stats["shift_minutes"] = 0
+    stats["tickets"] = 0
+    stats["reports"] = 0
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    await ctx.reply("Let’s set your new **goals for the week** 🎀\n\n"
+                    "How many **interviews** do you want to aim for?")
+
+    msg = await bot.wait_for("message", check=check)
+    stats["goal_interviews"] = int(msg.content)
+
+    await ctx.send("How many **trainings**?")
+    msg = await bot.wait_for("message", check=check)
+    stats["goal_trainings"] = int(msg.content)
+
+    await ctx.send("How many **shift minutes**?")
+    msg = await bot.wait_for("message", check=check)
+    stats["goal_shift_minutes"] = int(msg.content)
+
+    await ctx.send("How many **tickets**?")
+    msg = await bot.wait_for("message", check=check)
+    stats["goal_tickets"] = int(msg.content)
+
+    await ctx.send("How many **reports**?")
+    msg = await bot.wait_for("message", check=check)
+    stats["goal_reports"] = int(msg.content)
+
+    save_stats()
+    await update_tracker(ctx.channel)
+    await ctx.send("New week locked in. Let’s work. ✨")
+
+
+# -------------------
+# ⭐ ADD COMMANDS
+# -------------------
+
+# Interviews
+@bot.command(name="i")
+@in_tracker_channel()
+async def cmd_i(ctx, amount: int):
+    stats["interviews"] += amount
+    save_stats()
+    await update_tracker(ctx.channel)
+
+# Trainings
+@bot.command(name="t")
+@in_tracker_channel()
+async def cmd_t(ctx, amount: int):
+    stats["trainings"] += amount
+    save_stats()
+    await update_tracker(ctx.channel)
+
+# Shift minutes
+@bot.command(name="s")
+@in_tracker_channel()
+async def cmd_s(ctx, amount: int):
+    stats["shift_minutes"] += amount
+    save_stats()
+    await update_tracker(ctx.channel)
+
+# Tickets
+@bot.command(name="tk")
+@in_tracker_channel()
+async def cmd_tk(ctx, amount: int):
+    stats["tickets"] += amount
+    save_stats()
+    await update_tracker(ctx.channel)
+
+# Reports
+@bot.command(name="r")
+@in_tracker_channel()
+async def cmd_r(ctx, amount: int):
+    stats["reports"] += amount
+    save_stats()
+    await update_tracker(ctx.channel)
+
+
+# -------------------
+# ⭐ ON READY
+# -------------------
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    channel = bot.get_channel(TRACKER_CHANNEL_ID)
+    if channel:
+        await update_tracker(channel)
+
+
+bot.run(TOKEN)
